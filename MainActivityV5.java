@@ -839,56 +839,171 @@ public final class MainActivity extends Activity {
         return peaks;
     }
 
+    private long snapSceneBoundary(long candidate) {
+        if (clips.isEmpty()) return candidate;
+        long elapsed=0;
+        long best=candidate,closest=260;
+        for(Clip c:clips) {
+            long delta=Math.abs(candidate-elapsed);
+            if(delta<closest){closest=delta;best=elapsed;}
+            elapsed+=c.length();
+        }
+        long delta=Math.abs(candidate-elapsed);
+        if(delta<closest) best=elapsed;
+        return best;
+    }
+    private static long bound(long number,long min,long max) {
+        return Math.max(min,Math.min(Math.max(min,max),number));
+    }
+    private View.OnTouchListener audioGesture(SoundTrack t,FrameLayout tile,TextView label,int mode) {
+        return new View.OnTouchListener() {
+            float downX;long originalStart,originalEnd,originalPhase;
+            boolean moving=false;
+            @Override public boolean onTouch(View view,MotionEvent event) {
+                if(exporting) return true;
+                int action=event.getActionMasked();
+                if(action==MotionEvent.ACTION_DOWN) {
+                    downX=event.getRawX();
+                    originalStart=t.startMs;originalEnd=t.endMs;originalPhase=t.phaseMs;
+                    moving=false;
+                    videoPlayer.pause();pauseSounds();
+                    view.getParent().requestDisallowInterceptTouchEvent(true);
+                    return true;
+                }
+                if(action==MotionEvent.ACTION_MOVE) {
+                    long change=pixelsToMs(event.getRawX()-downX);
+                    if(Math.abs(change)>=60) moving=true;
+                    if(!moving) return true;
+                    long duration=originalEnd-originalStart;
+                    if(mode==0) {
+                        long shifted=snapSceneBoundary(originalStart+change);
+                        t.startMs=bound(shifted,0,Math.max(0,totalMs()-duration));
+                        t.endMs=t.startMs+duration;
+                        t.phaseMs=originalPhase;
+                    } else if(mode==1) {
+                        long earliest=Math.max(0,originalStart-originalPhase);
+                        long last=originalEnd-250;
+                        if(!t.repeat)last=Math.min(last,originalStart+Math.max(0,t.length()-originalPhase-250));
+                        long chosen=snapSceneBoundary(originalStart+change);
+                        t.startMs=bound(chosen,earliest,last);
+                        t.endMs=originalEnd;
+                        t.phaseMs=originalPhase+(t.startMs-originalStart);
+                    } else {
+                        long latest=t.repeat?totalMs():
+                            Math.min(totalMs(),originalStart+Math.max(250,t.length()-originalPhase));
+                        long chosen=snapSceneBoundary(originalEnd+change);
+                        t.endMs=bound(chosen,originalStart+250,latest);
+                        t.startMs=originalStart;t.phaseMs=originalPhase;
+                    }
+                    FrameLayout.LayoutParams params=(FrameLayout.LayoutParams)tile.getLayoutParams();
+                    params.leftMargin=msToPixels(t.startMs);
+                    params.width=Math.max(dp(12),msToPixels(t.endMs-t.startMs));
+                    tile.setLayoutParams(params);
+                    label.setText(shorten(t.name,20)+"   "+formatMs(t.startMs)+" – "+formatMs(t.endMs));
+                    return true;
+                }
+                if(action==MotionEvent.ACTION_UP) {
+                    view.getParent().requestDisallowInterceptTouchEvent(false);
+                    if(moving) {
+                        releaseSound(t);renderSoundTracks();saveDraft();
+                    } else if(mode==0) editSound(t);
+                    else editSound(t);
+                    return true;
+                }
+                if(action==MotionEvent.ACTION_CANCEL) {
+                    view.getParent().requestDisallowInterceptTouchEvent(false);
+                    if(moving) {releaseSound(t);renderSoundTracks();saveDraft();}
+                    return true;
+                }
+                return true;
+            }
+        };
+    }
+    private void splitTrackAtPlayhead(SoundTrack track) {
+        if(exporting || clips.isEmpty()) return;
+        long at=currentTimelineMs();
+        if(at<=track.startMs+250 || at>=track.endMs-250) {
+            toast("Posicione o cursor dentro do áudio e toque em DIVIDIR.");return;
+        }
+        if(sounds.size()>=MAX_SOUND_TRACKS) {toast("Limite de 24 segmentos de áudio.");return;}
+        SoundTrack next=new SoundTrack(track.uri,track.name,track.durationMs,at);
+        next.inMs=track.inMs;next.outMs=track.outMs;
+        next.endMs=track.endMs;
+        next.volume=track.volume;next.repeat=track.repeat;next.effect=track.effect;
+        next.phaseMs=track.phaseMs+(at-track.startMs);
+        if(next.repeat && next.length()>0) next.phaseMs %= next.length();
+        track.endMs=at;
+        releaseSound(track);
+        sounds.add(sounds.indexOf(track)+1,next);
+        renderSoundTracks();saveDraft();
+        toast("Áudio dividido em "+formatMs(at)+". Edite cada parte separadamente.");
+    }
     private void renderSoundTracks() {
         soundTimeline.removeAllViews();
         soundActions.removeAllViews();
-        soundsLabel.setText(sounds.isEmpty() ? "Adicione uma ou mais músicas, narrações ou efeitos." :
-            sounds.size() + " faixas  •  edite cenas, início, fim e volume de cada música");
-        final int pxPerSecond = 8;
-        int totalWidth = Math.max(dp(310), Math.min(dp(1300), (int)(totalMs() / 1000.0 * dp(pxPerSecond))));
-        for (int i = 0; i < sounds.size(); i++) {
-            final int index = i;
-            SoundTrack t = sounds.get(i);
-            LinearLayout lane = horizontal();
-            lane.setGravity(Gravity.CENTER_VERTICAL);
-            lane.setBackground(rounded(CARD, 8));
-            LinearLayout.LayoutParams laneP = new LinearLayout.LayoutParams(totalWidth, dp(78));
-            laneP.setMargins(0, 0, 0, dp(7));
-            soundTimeline.addView(lane, laneP);
-            int before = totalMs() == 0 ? 0 : (int)((double)t.startMs / totalMs() * totalWidth);
-            int visible = Math.max(dp(67), (int)((double)Math.min(Math.max(1, t.endMs-t.startMs), t.repeat ? t.endMs-t.startMs : t.length()) / Math.max(1, totalMs()) * totalWidth));
-            View gap = new View(this);
-            lane.addView(gap, new LinearLayout.LayoutParams(Math.min(before, totalWidth - dp(65)), 1));
-            int barWidth=Math.max(dp(72),Math.min(visible,totalWidth-Math.min(before,totalWidth-dp(65))));
-            LinearLayout block=vertical();
-            block.setPadding(dp(6),dp(3),dp(6),dp(3));
-            block.setBackground(rounded(index%2==0 ? PURPLE : GREEN,7));
-            lane.addView(block,new LinearLayout.LayoutParams(barWidth,dp(69)));
-            TextView name=text("♪ "+(index+1)+". "+t.name+"  "+t.volume+"%   "+formatMs(t.startMs)+"–"+formatMs(t.endMs),
-                11,Color.BLACK,true);
-            name.setSingleLine(true); name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            block.addView(name,new LinearLayout.LayoutParams(-1,dp(22)));
-            WaveformView wave=new WaveformView(t.uri,Color.rgb(30,36,51),t.inMs,t.outMs,t.durationMs);
-            block.addView(wave,new LinearLayout.LayoutParams(-1,dp(32)));
-            block.setOnClickListener(v -> editSound(t));
+        soundsLabel.setText(sounds.isEmpty()
+            ? "Importe músicas ou escolha a biblioteca online. Os áudios aparecem em faixas abaixo do vídeo."
+            : sounds.size()+" partes de áudio  •  mesma escala do vídeo acima  •  arraste │ bordas para cortar");
+        int width=timelineWidth();
+        if(sounds.isEmpty()) {
+            TextView empty=text("♪  Toque em + ÁUDIO ou ☁ ONLINE para adicionar sua primeira faixa.",12,MUTED,false);
+            soundTimeline.addView(empty,new LinearLayout.LayoutParams(width,dp(52)));
         }
-        for (int i = 0; i < sounds.size(); i++) {
-            final SoundTrack t = sounds.get(i);
-            LinearLayout row = horizontal();
-            soundActions.addView(row, margin(0, i == 0 ? 0 : 7));
-            Button btn = button("♪ " + (i + 1) + ". " + shorten(t.name, 19) + "  •  " + t.volume + "%", DARK);
-            btn.setTextColor(WHITE);
-            btn.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-            row.addView(btn, new LinearLayout.LayoutParams(0, dp(44), 1));
-            btn.setOnClickListener(v -> editSound(t));
-            Button delete = button("✕", DARK);
-            delete.setTextColor(WHITE);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(48), dp(44));
-            lp.setMargins(dp(7), 0, 0, 0);
-            row.addView(delete, lp);
-            delete.setOnClickListener(v -> {
-                if (exporting) return;
-                releaseSound(t); sounds.remove(t); renderSoundTracks(); saveDraft();
+        for(int i=0;i<sounds.size();i++) {
+            final int index=i;SoundTrack t=sounds.get(i);
+            FrameLayout lane=new FrameLayout(this);
+            lane.setBackground(rounded(i%2==0?CARD:DARK,7));
+            LinearLayout.LayoutParams row=new LinearLayout.LayoutParams(width,dp(86));
+            row.setMargins(0,0,0,dp(6));
+            soundTimeline.addView(lane,row);
+            long visibleLength=Math.max(250,t.endMs-t.startMs);
+            int barWidth=Math.max(dp(12),msToPixels(visibleLength));
+            int left=msToPixels(t.startMs);
+            FrameLayout tile=new FrameLayout(this);
+            tile.setBackground(rounded(index%2==0?PURPLE:GREEN,8));
+            FrameLayout.LayoutParams pos=new FrameLayout.LayoutParams(barWidth,dp(72));
+            pos.leftMargin=left;pos.topMargin=dp(7);
+            lane.addView(tile,pos);
+            LinearLayout content=vertical();
+            content.setPadding(dp(25),dp(5),dp(25),dp(4));
+            tile.addView(content,new FrameLayout.LayoutParams(-1,-1));
+            TextView name=text("♪ "+(i+1)+". "+t.name+"  "+t.volume+"%  "+formatMs(t.startMs)+"–"+formatMs(t.endMs),11,Color.BLACK,true);
+            name.setSingleLine(true);name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            content.addView(name,new LinearLayout.LayoutParams(-1,dp(21)));
+            WaveformView wave=new WaveformView(t.uri,Color.rgb(24,31,52),t.inMs,t.outMs,t.durationMs);
+            content.addView(wave,new LinearLayout.LayoutParams(-1,dp(35)));
+            content.setOnTouchListener(audioGesture(t,tile,name,0));
+            TextView handleLeft=text("┃",22,Color.BLACK,true);
+            handleLeft.setGravity(Gravity.CENTER);
+            handleLeft.setBackground(rounded(Color.argb(90,255,255,255),5));
+            FrameLayout.LayoutParams lh=new FrameLayout.LayoutParams(dp(25),-1,Gravity.START);
+            tile.addView(handleLeft,lh);
+            handleLeft.setOnTouchListener(audioGesture(t,tile,name,1));
+            TextView handleRight=text("┃",22,Color.BLACK,true);
+            handleRight.setGravity(Gravity.CENTER);
+            handleRight.setBackground(rounded(Color.argb(90,255,255,255),5));
+            FrameLayout.LayoutParams rh=new FrameLayout.LayoutParams(dp(25),-1,Gravity.END);
+            tile.addView(handleRight,rh);
+            handleRight.setOnTouchListener(audioGesture(t,tile,name,2));
+        }
+        for(int i=0;i<sounds.size();i++) {
+            SoundTrack t=sounds.get(i);
+            LinearLayout controls=horizontal();
+            soundActions.addView(controls,margin(0,i==0?3:6));
+            Button edit=button("♪ "+(i+1)+". "+shorten(t.name,12),DARK);
+            edit.setTextColor(WHITE);
+            controls.addView(edit,new LinearLayout.LayoutParams(0,dp(44),2));
+            edit.setOnClickListener(v->editSound(t));
+            Button split=button("✂ DIVIDIR",GREEN);
+            LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(0,dp(44),1);
+            sp.setMargins(dp(4),0,0,0);controls.addView(split,sp);
+            split.setOnClickListener(v->splitTrackAtPlayhead(t));
+            Button del=button("✕",DARK);del.setTextColor(WHITE);
+            LinearLayout.LayoutParams xp=new LinearLayout.LayoutParams(dp(45),dp(44));xp.setMargins(dp(4),0,0,0);
+            controls.addView(del,xp);
+            del.setOnClickListener(v->{
+                if(exporting)return;
+                releaseSound(t);sounds.remove(t);renderSoundTracks();saveDraft();
             });
         }
     }
