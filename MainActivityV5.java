@@ -121,7 +121,7 @@ public final class MainActivity extends Activity {
     private static final String ONLINE_URL =
         "https://raw.githubusercontent.com/alextelles0023-beep/XandyCut/main/audio/catalog.json";
     private static final String ONLINE_BASE =
-        "https://github.com/alextelles0023-beep/XandyCut/releases/download/v1.3-beta/";
+        "https://github.com/alextelles0023-beep/XandyCut/releases/download/v1.4-beta/";
     private static final String[] BUILTIN_NAMES = {
         "Cinema épico", "Suspense escuro", "Lo-fi tranquilo", "Afro groove", "Piano suave",
         "Neon futurista", "Whoosh de transição", "Impacto dramático", "Sino mágico"
@@ -393,7 +393,7 @@ public final class MainActivity extends Activity {
             } else if (request == PICK_MUSIC) {
                 if (sounds.size() >= MAX_SOUND_TRACKS) { toast("Limite de 24 faixas por montagem."); break; }
                 SoundTrack track = new SoundTrack(uri, displayName(uri), duration, Math.min(insertion, Math.max(0,totalMs()-1)));
-                track.endMs = totalMs();
+                track.endMs = Math.min(totalMs(), track.startMs+duration);
                 sounds.add(track);
                 ok++;
             }
@@ -1100,6 +1100,7 @@ public final class MainActivity extends Activity {
                 if (end-start < 250 || end > totalMs() || f < 0 || e > t.durationMs || e-f < 250)
                     throw new IllegalArgumentException("Verifique os tempos da música e das cenas.");
                 t.startMs = start; t.endMs = end;
+                if(f!=t.inMs || e!=t.outMs) t.phaseMs=0;
                 t.inMs = f; t.outMs = e; t.volume = volume.getProgress(); t.repeat = repeat.isChecked();
                 releaseSound(t); renderSoundTracks(); saveDraft(); pauseSounds();
                 dialog.dismiss();
@@ -1453,22 +1454,25 @@ public final class MainActivity extends Activity {
             if (s.volume == 0 || s.startMs >= duration || s.length() <= 0 || s.endMs-s.startMs < 100) continue;
             EditedMediaItemSequence.Builder lane = new EditedMediaItemSequence.Builder(Collections.singleton(C.TRACK_TYPE_AUDIO));
             if (s.startMs > 0) lane.addGap(s.startMs * 1000L);
-            long remaining = Math.max(0, Math.min(duration,s.endMs) - s.startMs);
-            long audioPlayed = 0;
-            int n = 0;
-            do {
-                long take = Math.min(remaining, s.length());
-                if (take < 100) break;
-                MediaItem source = new MediaItem.Builder().setUri(s.uri)
+            long remaining = Math.max(0L,Math.min(duration,s.endMs)-s.startMs);
+            long audioPlayed=0L,offset=Math.max(0L,s.phaseMs);
+            long totalSegment=s.length();
+            int n=0;
+            while(remaining>=100L && n<500) {
+                long sourceOffset=s.repeat ? offset % totalSegment : offset;
+                if(sourceOffset>=totalSegment)break;
+                long take=Math.min(remaining,totalSegment-sourceOffset);
+                if(take<100)break;
+                MediaItem source=new MediaItem.Builder().setUri(s.uri)
                     .setClippingConfiguration(new MediaItem.ClippingConfiguration.Builder()
-                        .setStartPositionMs(s.inMs).setEndPositionMs(s.inMs + take).build()).build();
-                EditedMediaItem e = new EditedMediaItem.Builder(source)
-                    .setEffects(new Effects(volumeEffects(s.volume), Collections.emptyList())).build();
-                lane.addItem(e);
-                remaining -= take;
-                audioPlayed += take;
-                n++;
-            } while (s.repeat && remaining >= 100 && n < 200);
+                        .setStartPositionMs(s.inMs+sourceOffset)
+                        .setEndPositionMs(s.inMs+sourceOffset+take).build()).build();
+                EditedMediaItem item=new EditedMediaItem.Builder(source)
+                    .setEffects(new Effects(volumeEffects(s.volume),Collections.emptyList())).build();
+                lane.addItem(item);
+                remaining-=take;audioPlayed+=take;offset+=take;n++;
+                if(!s.repeat)break;
+            }
             long silence = duration - s.startMs - audioPlayed;
             if (silence > 0) lane.addGap(silence * 1000L);
             sequences.add(lane.build());
