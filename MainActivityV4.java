@@ -51,6 +51,7 @@ import androidx.media3.common.audio.ChannelMixingMatrix;
 import androidx.media3.common.audio.ToInt16PcmAudioProcessor;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.effect.Presentation;
 import androidx.media3.transformer.Composition;
 import androidx.media3.transformer.EditedMediaItem;
 import androidx.media3.transformer.EditedMediaItemSequence;
@@ -133,6 +134,8 @@ public final class MainActivity extends Activity {
         String name;
         long durationMs, fromMs, toMs;
         String transition = TRANSITIONS[0];
+        long transitionDurationMs = TRANSITION_MS;
+        int volume = 100;
         Clip(Uri uri, String name, long durationMs) {
             this.uri = uri;
             this.name = name;
@@ -173,6 +176,7 @@ public final class MainActivity extends Activity {
     private File tempFile;
     private Uri lastVideo;
     private boolean exporting, scrubbing;
+    private boolean cropVertical = false;
     private int originalVolume = 55;
     private long lastPreviewMs = -1;
     private int selectedClip = -1;
@@ -211,7 +215,7 @@ public final class MainActivity extends Activity {
 
         TextView title = text("XANDY CUT", 27, CYAN, true);
         root.addView(title);
-        root.addView(text("ESTÚDIO DE MONTAGEM • V1.3", 11, MUTED, true), margin(0, 3));
+        root.addView(text("ESTÚDIO DE MONTAGEM • V1.3 · 9:16", 11, MUTED, true), margin(0, 3));
 
         FrameLayout previewFrame = new FrameLayout(this);
         previewFrame.setBackgroundColor(Color.BLACK);
@@ -301,13 +305,19 @@ public final class MainActivity extends Activity {
             @Override public void onProgressChanged(SeekBar bar, int p, boolean user) {
                 originalVolume = p;
                 originalLabel.setText("ÁUDIO ORIGINAL DOS VÍDEOS  •  " + p + "%");
-                if (videoPlayer != null) videoPlayer.setVolume(p / 100f);
+                if (videoPlayer != null) updateVideoVolumePreview();
             }
             @Override public void onStartTrackingTouch(SeekBar bar) { }
             @Override public void onStopTrackingTouch(SeekBar bar) { saveDraft(); }
         });
 
-        exportButton = button("EXPORTAR VÍDEO MP4", CYAN);
+        root.addView(text("FORMATO DE SAÍDA · 1080 × 1920 VERTICAL (9:16)", 12, WHITE, true), margin(0, 19));
+        CheckBox cropCheck = new CheckBox(this);
+        cropCheck.setText("Preencher tela 9:16 (pode cortar bordas). Desmarcado: preservar tudo com bordas pretas.");
+        cropCheck.setTextColor(MUTED); cropCheck.setTextSize(12); cropCheck.setChecked(cropVertical);
+        cropCheck.setOnCheckedChangeListener((v, on) -> { cropVertical = on; saveDraft(); });
+        root.addView(cropCheck, margin(0, 4));
+        exportButton = button("EXPORTAR 1080 × 1920 • MP4", CYAN);
         exportButton.setTextSize(16);
         root.addView(exportButton, margin(0, 24));
         exportButton.setOnClickListener(v -> export());
@@ -467,6 +477,7 @@ public final class MainActivity extends Activity {
                 if (!scrubbing && totalMs() > 0) playhead.setProgress((int)(1000 * now / totalMs()));
                 if (!scrubbing) timeLabel.setText(formatMs(now) + " / " + formatMs(totalMs()));
                 updateTransitionPreview(now);
+                updateVideoVolumePreview();
                 if (videoPlayer.isPlaying()) {
                     playButton.setText("Ⅱ");
                     syncSounds(now);
@@ -511,7 +522,7 @@ public final class MainActivity extends Activity {
         renderSoundTracks();
         originalSeek.setProgress(originalVolume);
         originalLabel.setText("ÁUDIO ORIGINAL DOS VÍDEOS  •  " + originalVolume + "%");
-        videoPlayer.setVolume(originalVolume / 100f);
+        updateVideoVolumePreview();
     }
 
     private void renderVideoTimeline() {
@@ -539,7 +550,7 @@ public final class MainActivity extends Activity {
             thumb.setBackgroundColor(Color.rgb(45, 46, 56));
             tile.addView(thumb, new LinearLayout.LayoutParams(-1, dp(76)));
             makeThumbnail(c, thumb);
-            TextView name = text((i + 1) + " · " + formatMs(c.length()), 12, WHITE, true);
+            TextView name = text((i + 1) + " · " + formatMs(c.length()) + "  ♪" + c.volume + "%", 11, WHITE, true);
             name.setGravity(Gravity.CENTER);
             tile.addView(name, margin(0, 6));
             tile.setOnClickListener(v -> { selectedClip = index; seekStartOf(index); renderVideoTimeline(); });
@@ -553,7 +564,7 @@ public final class MainActivity extends Activity {
             }
         }
         Clip active = clips.get(selectedClip);
-        clipLabel.setText("Selecionado: " + (selectedClip + 1) + ". " + active.name + "  •  " + formatMs(active.length()));
+        clipLabel.setText("Selecionado: " + (selectedClip + 1) + ". " + active.name + "  •  " + formatMs(active.length()) + "  •  som " + active.volume + "%");
         LinearLayout row = horizontal();
         clipActions.addView(row);
         equalButton(row, "✂ CORTAR", PURPLE, () -> editClip(active));
@@ -615,25 +626,45 @@ public final class MainActivity extends Activity {
         clips.add(++selectedClip, b);
         reloadVideo(0); redraw(); saveDraft();
     }
+    private void updateVideoVolumePreview() {
+        if (videoPlayer == null) return;
+        int index = videoPlayer.getCurrentMediaItemIndex();
+        if (index < 0 || index >= clips.size()) index = selectedClip;
+        int clipVol = index >= 0 && index < clips.size() ? clips.get(index).volume : 100;
+        videoPlayer.setVolume((originalVolume / 100f) * (clipVol / 100f));
+    }
     private void editClip(Clip c) {
         if (exporting) return;
         LinearLayout form = dialogForm();
-        form.addView(text("Duração de origem: " + formatMs(c.durationMs) + " • início e fim em segundos", 13, Color.DKGRAY, false));
+        form.addView(text("Duração da cena: " + formatMs(c.durationMs) + " • corte em segundos", 13, Color.DKGRAY, false));
         EditText from = decimalInput("Início (segundos)", c.fromMs); form.addView(from);
         EditText to = decimalInput("Fim (segundos)", c.toMs); form.addView(to);
-        new AlertDialog.Builder(this).setTitle("Cortar clipe")
-            .setView(form).setNegativeButton("Cancelar", null)
-            .setPositiveButton("Aplicar", (d, i) -> {
-                try {
-                    long f = parseSeconds(from), t = parseSeconds(to);
-                    if (f < 0 || t > c.durationMs || t - f < 250) throw new IllegalArgumentException();
-                    c.fromMs = f; c.toMs = t;
-                    reloadVideo(0); redraw(); saveDraft();
-                } catch (Exception ex) { toast("Intervalo inválido. Confira início e fim."); }
-            }).show();
+        form.addView(text("VOLUME DO SOM ORIGINAL DESTA CENA", 13, Color.DKGRAY, true), margin(0, 16));
+        TextView volLabel = text("Cena: " + c.volume + "%  •  Volume geral: " + originalVolume + "%", 13, Color.DKGRAY, false);
+        form.addView(volLabel);
+        SeekBar clipVol = new SeekBar(this); clipVol.setMax(100); clipVol.setProgress(c.volume);
+        clipVol.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb,int p,boolean u) { volLabel.setText("Cena: " + p + "%  •  Volume geral: " + originalVolume + "%"); }
+            @Override public void onStartTrackingTouch(SeekBar sb) {}
+            @Override public void onStopTrackingTouch(SeekBar sb) {}
+        });
+        form.addView(clipVol);
+        form.addView(text("Use 0% para silenciar o clipe enquanto a música toca. A regulagem não muda os outros clipes.", 12, Color.DKGRAY, false));
+        ScrollView scroll = new ScrollView(this);scroll.addView(form);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Editar cena " + (clips.indexOf(c)+1))
+            .setView(scroll).setNegativeButton("Cancelar",null).setPositiveButton("Aplicar",null).create();
+        dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w -> {
+            try {
+                long f = parseSeconds(from), t = parseSeconds(to);
+                if (f<0 || t>c.durationMs || t-f<250) throw new IllegalArgumentException();
+                c.fromMs=f; c.toMs=t; c.volume=clipVol.getProgress();
+                reloadVideo(0); redraw(); saveDraft(); dialog.dismiss();
+            } catch(Exception ex) { toast("Corte inválido. Confira os segundos de início e fim."); }
+        }));
+        dialog.show();
     }
 
-    private void renderSoundTracks() {
+        private void renderSoundTracks() {
         soundTimeline.removeAllViews();
         soundActions.removeAllViews();
         soundsLabel.setText(sounds.isEmpty() ? "Adicione uma ou mais músicas, narrações ou efeitos." :
@@ -787,36 +818,59 @@ public final class MainActivity extends Activity {
 
         // Alteracoes visuais renderizadas no video exportado; corte seco, dip to black,
     // dip to white e clarão ciano. Crossfade real ainda nao e suportado pelo Media3.
-    private static RgbMatrix makeTransitionEffect(String incoming, String outgoing, long lengthMs) {
-        return (presentationTimeUs, useHdr) -> {
-            long ms = presentationTimeUs / 1000L;
-            float amount = 0f;
-            String effect = TRANSITIONS[0];
-            if (!TRANSITIONS[0].equals(incoming) && ms >= 0 && ms < TRANSITION_MS) {
-                amount = Math.max(0f, 1f - (float)ms / TRANSITION_MS);
-                effect = incoming;
+    private static RgbMatrix makeTransitionEffect(String incoming, long inDurationMs,
+                                                   String outgoing, long outDurationMs, long lengthMs) {
+        return (presentationTimeUs,useHdr) -> {
+            long ms=presentationTimeUs/1000L;
+            float amount=0f; String effect=TRANSITIONS[0];
+            long inMs=Math.min(inDurationMs,Math.max(1L,lengthMs/2L));
+            long outMs=Math.min(outDurationMs,Math.max(1L,lengthMs/2L));
+            if(!TRANSITIONS[0].equals(incoming) && ms>=0 && ms<inMs) {
+                amount=Math.max(0f,1f-(float)ms/inMs);effect=incoming;
             }
-            if (!TRANSITIONS[0].equals(outgoing) && ms > lengthMs - TRANSITION_MS && ms <= lengthMs + 20) {
-                float next = Math.min(1f, (ms - Math.max(0, lengthMs - TRANSITION_MS)) / (float)Math.max(1, Math.min(TRANSITION_MS, lengthMs)));
-                if (next > amount) { amount = next; effect = outgoing; }
+            if(!TRANSITIONS[0].equals(outgoing) && ms>lengthMs-outMs && ms<=lengthMs+20L) {
+                float fade=Math.min(1f,(ms-Math.max(0,lengthMs-outMs))/(float)outMs);
+                if(fade>amount){amount=fade;effect=outgoing;}
             }
-            amount = Math.min(1f, Math.max(0f, amount));
-            float scale = 1f - amount, r=0f, g=0f, b=0f;
-            if (TRANSITIONS[2].equals(effect)) { r=amount; g=amount; b=amount; }
-            else if (TRANSITIONS[3].equals(effect)) { r=.04f*amount; g=.85f*amount; b=.74f*amount; }
-            return new float[] {scale,0,0,0, 0,scale,0,0, 0,0,scale,0, r,g,b,1};
+            amount=Math.min(1f,Math.max(0f,amount));
+            float scale=1f-amount,r=0f,g=0f,b=0f;
+            if(TRANSITIONS[2].equals(effect)){r=amount;g=amount;b=amount;}
+            else if(TRANSITIONS[3].equals(effect)){r=.04f*amount;g=.85f*amount;b=.74f*amount;}
+            return new float[]{scale,0,0,0,0,scale,0,0,0,0,scale,0,r,g,b,1};
         };
     }
 
     private void chooseTransition(int position) {
-        if (exporting || position < 0 || position >= clips.size() - 1) return;
-        Clip clip = clips.get(position);
-        new AlertDialog.Builder(this).setTitle("Troca da cena " + (position+1) + " → " + (position+2))
-            .setSingleChoiceItems(TRANSITIONS, Arrays.asList(TRANSITIONS).indexOf(clip.transition),
-                (dialog, which) -> {
-                    clip.transition = TRANSITIONS[which];
-                    renderVideoTimeline(); saveDraft(); dialog.dismiss();
-                }).setNegativeButton("Cancelar", null).show();
+        if (exporting || position < 0 || position >= clips.size()-1) return;
+        Clip clip = clips.get(position), next = clips.get(position+1);
+        int max = (int)Math.max(100L,Math.min(2500L,Math.min(clip.length(),next.length())/2));
+        LinearLayout form = dialogForm();
+        form.addView(text("EFEITO ENTRE AS CENAS " + (position+1) + " E " + (position+2),13,Color.DKGRAY,true));
+        Spinner types=new Spinner(this);
+        ArrayAdapter<String> choices=new ArrayAdapter<>(this,android.R.layout.simple_spinner_item,TRANSITIONS);
+        choices.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        types.setAdapter(choices);
+        types.setSelection(Math.max(0,Arrays.asList(TRANSITIONS).indexOf(clip.transition)));
+        form.addView(types,margin(0,8));
+        TextView durationLabel=text("Duração: "+String.format(Locale.US,"%.2f",clip.transitionDurationMs/1000.0)+" segundo(s)",13,Color.DKGRAY,true);
+        form.addView(durationLabel,margin(0,15));
+        SeekBar duration=new SeekBar(this);duration.setMax(Math.max(0,max-100));
+        duration.setProgress(Math.max(0,Math.min(max-100,(int)clip.transitionDurationMs-100)));
+        duration.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb,int p,boolean u) {
+                durationLabel.setText("Duração: "+String.format(Locale.US,"%.2f",(p+100)/1000.0)+" segundo(s)");
+            }
+            @Override public void onStartTrackingTouch(SeekBar sb) {}
+            @Override public void onStopTrackingTouch(SeekBar sb) {}
+        });
+        form.addView(duration);
+        form.addView(text("Quanto mais longa a transição, mais suave a entrada e saída do efeito. O tempo máximo depende da duração das duas cenas.",12,Color.DKGRAY,false));
+        new AlertDialog.Builder(this).setTitle("Transição ajustável").setView(form)
+            .setNegativeButton("Cancelar",null).setPositiveButton("Aplicar",(dialog,which)->{
+                clip.transition=TRANSITIONS[types.getSelectedItemPosition()];
+                clip.transitionDurationMs=duration.getProgress()+100L;
+                renderVideoTimeline(); saveDraft(); updateTransitionPreview(currentTimelineMs());
+            }).show();
     }
     private String transitionSymbol(String type) {
         if (TRANSITIONS[1].equals(type)) return "◀ PRETO ▶";
@@ -834,12 +888,12 @@ public final class MainActivity extends Activity {
             long start = elapsed, end = elapsed + clip.length();
             if (globalMs >= start && (globalMs < end || i == clips.size()-1)) {
                 long local = globalMs - start;
-                if (i > 0 && !TRANSITIONS[0].equals(clips.get(i-1).transition) && local < TRANSITION_MS) {
-                    opacity = 1f - local/(float)TRANSITION_MS;
+                if (i > 0 && !TRANSITIONS[0].equals(clips.get(i-1).transition) && local < clips.get(i-1).transitionDurationMs) {
+                    opacity = 1f - local/(float)Math.max(1L,clips.get(i-1).transitionDurationMs);
                     color = transitionColor(clips.get(i-1).transition);
                 }
-                if (i < clips.size()-1 && !TRANSITIONS[0].equals(clip.transition) && end-globalMs < TRANSITION_MS) {
-                    float out = 1f - (end-globalMs)/(float)TRANSITION_MS;
+                if (i < clips.size()-1 && !TRANSITIONS[0].equals(clip.transition) && end-globalMs < clip.transitionDurationMs) {
+                    float out = 1f - (end-globalMs)/(float)Math.max(1L,clip.transitionDurationMs);
                     if (out > opacity) { opacity = out; color = transitionColor(clip.transition); }
                 }
                 break;
@@ -1086,8 +1140,12 @@ public final class MainActivity extends Activity {
             String incoming = i > 0 ? clips.get(i-1).transition : TRANSITIONS[0];
             String outgoing = i < clips.size()-1 ? c.transition : TRANSITIONS[0];
             if (!TRANSITIONS[0].equals(incoming) || !TRANSITIONS[0].equals(outgoing))
-                videoEffects.add(makeTransitionEffect(incoming, outgoing, c.length()));
-            b.setEffects(new Effects(originalVolume > 0 ? volumeEffects(originalVolume) :
+                videoEffects.add(makeTransitionEffect(incoming,
+                    i>0 ? clips.get(i-1).transitionDurationMs : TRANSITION_MS,
+                    outgoing,c.transitionDurationMs,c.length()));
+            videoEffects.add(Presentation.createForWidthAndHeight(1080,1920,
+                cropVertical ? Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP : Presentation.LAYOUT_SCALE_TO_FIT));
+            b.setEffects(new Effects(originalVolume > 0 ? volumeEffects(originalVolume*c.volume/100) :
                 Collections.emptyList(), videoEffects));
             videoItems.add(b.build());
         }
@@ -1122,7 +1180,7 @@ public final class MainActivity extends Activity {
         Composition composition = new Composition.Builder(sequences).build();
         tempFile = new File(getCacheDir(), "xandy_export_" + System.currentTimeMillis() + ".mp4");
         setExporting(true);
-        statusLabel.setText("Renderizando vídeo com as trilhas... mantenha o aplicativo aberto.");
+        statusLabel.setText("Exportando 1080×1920 vertical com trilhas... mantenha o aplicativo aberto.");
         progressBar.setProgress(0);
         try {
             transformer = new Transformer.Builder(this)
@@ -1235,13 +1293,13 @@ public final class MainActivity extends Activity {
     private void saveDraft() {
         try {
             JSONObject root = new JSONObject();
-            root.put("volume", originalVolume);
+            root.put("volume", originalVolume); root.put("cropVertical", cropVertical);
             JSONArray vc = new JSONArray();
             for (Clip c : clips) {
                 JSONObject o = new JSONObject();
                 o.put("uri", c.uri.toString()); o.put("name", c.name);
                 o.put("duration", c.durationMs); o.put("from", c.fromMs); o.put("to", c.toMs);
-                o.put("transition", c.transition);
+                o.put("transition", c.transition); o.put("transitionDurationMs", c.transitionDurationMs); o.put("volume", c.volume);
                 vc.put(o);
             }
             root.put("clips", vc);
@@ -1263,6 +1321,7 @@ public final class MainActivity extends Activity {
         try {
             JSONObject root = new JSONObject(data);
             originalVolume = root.optInt("volume", 55);
+            cropVertical = root.optBoolean("cropVertical", false);
             JSONArray vc = root.optJSONArray("clips");
             if (vc != null) for (int i = 0; i < vc.length(); i++) {
                 JSONObject o = vc.getJSONObject(i);
@@ -1270,6 +1329,8 @@ public final class MainActivity extends Activity {
                 Clip c = new Clip(uri, o.getString("name"), o.getLong("duration"));
                 c.fromMs = o.getLong("from"); c.toMs = o.getLong("to");
                 c.transition = o.optString("transition", TRANSITIONS[0]);
+                c.transitionDurationMs = o.optLong("transitionDurationMs", TRANSITION_MS);
+                c.volume = o.optInt("volume", 100);
                 clips.add(c);
             }
             JSONArray va = root.optJSONArray("sounds");
