@@ -7,6 +7,15 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.media.MediaExtractor;
+import android.media.MediaCodec;
+import android.media.MediaFormat;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.HashMap;
+import java.util.HashSet;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaMetadataRetriever;
@@ -191,6 +200,8 @@ public final class MainActivity extends Activity {
     private View transitionMask;
     private ExoPlayer catalogPlayer;
     private boolean catalogLoading = false;
+    private final HashMap<String,float[]> waveformPeaks = new HashMap<>();
+    private final HashSet<String> waveformPending = new HashSet<>();
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -664,7 +675,138 @@ public final class MainActivity extends Activity {
         dialog.show();
     }
 
-        private void renderSoundTracks() {
+        private static final int WAVEFORM_BINS=96;
+    private class WaveformView extends View {
+        final Uri audio;
+        final int tint;
+        final long fromMs, toMs, durationMs;
+        final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        WaveformView(Uri uri,int tint,long f,long t,long d) {
+            super(MainActivity.this);
+            audio=uri;this.tint=tint;fromMs=f;toMs=t;durationMs=d;
+            ensureWaveform(uri);
+        }
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float[] peaks=waveformPeaks.get(audio.toString());
+            float width=getWidth(), height=getHeight(), center=height/2f;
+            int barCount= WAVEFORM_BINS;
+            if(peaks==null) {
+                paint.setColor(Color.argb(105,255,255,255));
+                canvas.drawLine(0,center,width,center,paint);
+                return;
+            }
+            float step=width/barCount;
+            float max=Math.max(1f,height*.49f);
+            for(int i=0;i<barCount;i++) {
+                float progress=(i+.5f)/barCount;
+                boolean selected=progress>=fromMs/(float)Math.max(1L,durationMs)
+                    && progress<=toMs/(float)Math.max(1L,durationMs);
+                paint.setColor(selected ? tint : Color.argb(110,215,220,230));
+                float barHeight=Math.max(dp(2),peaks[i]*max);
+                float left=i*step+step*.19f, right=left+Math.max(1f,step*.58f);
+                canvas.drawRoundRect(left,center-barHeight,right,center+barHeight,dp(1),dp(1),paint);
+            }
+        }
+    }
+    private void ensureWaveform(Uri uri) {
+        String key=uri.toString();
+        if (waveformPeaks.containsKey(key)||waveformPending.contains(key)) return;
+        waveformPending.add(key);
+        worker.execute(() -> {
+            float[] peaks=decodeWaveform(uri);
+            runOnUiThread(() -> {
+                waveformPending.remove(key);
+                waveformPeaks.put(key,peaks);
+                if (!isFinishing()&&!exporting) renderSoundTracks();
+            });
+        });
+    }
+    private float[] decodeWaveform(Uri uri) {
+        float[] peaks=new float[WAVEFORM_BINS];
+        MediaExtractor extractor=new MediaExtractor();
+        MediaCodec codec=null;
+        try {
+            if ("file".equals(uri.getScheme())) extractor.setDataSource(uri.getPath());
+            else extractor.setDataSource(this,uri,null);
+            MediaFormat inputFormat=null;
+            int audioTrack=-1;
+            for(int i=0;i<extractor.getTrackCount();i++) {
+                MediaFormat f=extractor.getTrackFormat(i);
+                String mime=f.getString(MediaFormat.KEY_MIME);
+                if (mime!=null && mime.startsWith("audio/")) {inputFormat=f;audioTrack=i;break;}
+            }
+            if(audioTrack<0 || inputFormat==null) return peaks;
+            extractor.selectTrack(audioTrack);
+            long totalUs=inputFormat.containsKey(MediaFormat.KEY_DURATION)
+                ? inputFormat.getLong(MediaFormat.KEY_DURATION)
+                : Math.max(1000,duration(uri)*1000);
+            String mime=inputFormat.getString(MediaFormat.KEY_MIME);
+            if(mime==null)return peaks;
+            codec=MediaCodec.createDecoderByType(mime);
+            codec.configure(inputFormat,null,null,0);
+            codec.start();
+            MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
+            boolean endInput=false,endOutput=false;
+            int loops=0, sampleRate=inputFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)
+                ? inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE):44100;
+            int channels=inputFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)
+                ? Math.max(1,inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)):2;
+            while(!endOutput&&loops++<18000 && !Thread.currentThread().isInterrupted()) {
+                if(!endInput) {
+                    int index=codec.dequeueInputBuffer(10000);
+                    if(index>=0) {
+                        ByteBuffer ib=codec.getInputBuffer(index);
+                        if(ib==null)throw new IllegalStateException("Buffer de áudio ausente");
+                        ib.clear();
+                        int size=extractor.readSampleData(ib,0);
+                        if(size<0) {
+                            codec.queueInputBuffer(index,0,0,0,MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                            endInput=true;
+                        } else {
+                            codec.queueInputBuffer(index,0,size,extractor.getSampleTime(),0);
+                            extractor.advance();
+                        }
+                    }
+                }
+                int index=codec.dequeueOutputBuffer(info,10000);
+                if(index==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    MediaFormat of=codec.getOutputFormat();
+                    if(of.containsKey(MediaFormat.KEY_SAMPLE_RATE))sampleRate=of.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+                    if(of.containsKey(MediaFormat.KEY_CHANNEL_COUNT))channels=Math.max(1,of.getInteger(MediaFormat.KEY_CHANNEL_COUNT));
+                } else if(index>=0) {
+                    ByteBuffer ob=codec.getOutputBuffer(index);
+                    if(ob!=null&&info.size>1) {
+                        ob.order(ByteOrder.LITTLE_ENDIAN);
+                        int stride=Math.max(channels*2,(info.size/180/(channels*2))*(channels*2));
+                        for(int p=0;p+1<info.size;p+=stride) {
+                            int absolute=info.offset+p;
+                            if(absolute+1>=ob.limit())break;
+                            float timeUs=info.presentationTimeUs+
+                                (p/(float)Math.max(1,channels*2*sampleRate))*1000000f;
+                            int bin=(int)(timeUs/Math.max(1L,totalUs)*WAVEFORM_BINS);
+                            if(bin<0||bin>=WAVEFORM_BINS)continue;
+                            float sample=Math.abs(ob.getShort(absolute)/32768f);
+                            peaks[bin]=Math.max(peaks[bin],sample);
+                        }
+                    }
+                    endOutput=(info.flags&MediaCodec.BUFFER_FLAG_END_OF_STREAM)!=0;
+                    codec.releaseOutputBuffer(index,false);
+                }
+            }
+        } catch(Exception e) {
+            android.util.Log.w("XandyCut","Nao foi possivel extrair onda do audio: "+friendly(e));
+        } finally {
+            if(codec!=null){try{codec.stop();}catch(Exception ignored){}try{codec.release();}catch(Exception ignored){}}
+            try{extractor.release();}catch(Exception ignored){}
+        }
+        float strongest=0f;
+        for(float v:peaks)strongest=Math.max(strongest,v);
+        if(strongest>0f)for(int i=0;i<peaks.length;i++)peaks[i]=Math.min(1f,peaks[i]/strongest);
+        return peaks;
+    }
+
+    private void renderSoundTracks() {
         soundTimeline.removeAllViews();
         soundActions.removeAllViews();
         soundsLabel.setText(sounds.isEmpty() ? "Adicione uma ou mais músicas, narrações ou efeitos." :
@@ -677,19 +819,25 @@ public final class MainActivity extends Activity {
             LinearLayout lane = horizontal();
             lane.setGravity(Gravity.CENTER_VERTICAL);
             lane.setBackground(rounded(CARD, 8));
-            LinearLayout.LayoutParams laneP = new LinearLayout.LayoutParams(totalWidth, dp(54));
+            LinearLayout.LayoutParams laneP = new LinearLayout.LayoutParams(totalWidth, dp(78));
             laneP.setMargins(0, 0, 0, dp(7));
             soundTimeline.addView(lane, laneP);
             int before = totalMs() == 0 ? 0 : (int)((double)t.startMs / totalMs() * totalWidth);
             int visible = Math.max(dp(67), (int)((double)Math.min(Math.max(1, t.endMs-t.startMs), t.repeat ? t.endMs-t.startMs : t.length()) / Math.max(1, totalMs()) * totalWidth));
             View gap = new View(this);
             lane.addView(gap, new LinearLayout.LayoutParams(Math.min(before, totalWidth - dp(65)), 1));
-            TextView bar = text("♪  " + (index + 1) + ". " + t.name + "\n" + formatMs(t.startMs) + " → " + formatMs(t.endMs) + "   " + t.volume + "%" + (t.repeat ? "  ↻" : ""), 12, Color.BLACK, true);
-            bar.setMaxLines(2);
-            bar.setPadding(dp(9), dp(7), dp(9), dp(7));
-            bar.setBackground(rounded(index % 2 == 0 ? PURPLE : GREEN, 7));
-            lane.addView(bar, new LinearLayout.LayoutParams(Math.max(dp(64), Math.min(visible, totalWidth - Math.min(before, totalWidth-dp(65)))), dp(46)));
-            bar.setOnClickListener(v -> editSound(t));
+            int barWidth=Math.max(dp(72),Math.min(visible,totalWidth-Math.min(before,totalWidth-dp(65))));
+            LinearLayout block=vertical();
+            block.setPadding(dp(6),dp(3),dp(6),dp(3));
+            block.setBackground(rounded(index%2==0 ? PURPLE : GREEN,7));
+            lane.addView(block,new LinearLayout.LayoutParams(barWidth,dp(69)));
+            TextView name=text("♪ "+(index+1)+". "+t.name+"  "+t.volume+"%   "+formatMs(t.startMs)+"–"+formatMs(t.endMs),
+                11,Color.BLACK,true);
+            name.setSingleLine(true); name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            block.addView(name,new LinearLayout.LayoutParams(-1,dp(22)));
+            WaveformView wave=new WaveformView(t.uri,Color.rgb(30,36,51),t.inMs,t.outMs,t.durationMs);
+            block.addView(wave,new LinearLayout.LayoutParams(-1,dp(32)));
+            block.setOnClickListener(v -> editSound(t));
         }
         for (int i = 0; i < sounds.size(); i++) {
             final SoundTrack t = sounds.get(i);
