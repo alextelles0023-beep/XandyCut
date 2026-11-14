@@ -549,60 +549,80 @@ public final class MainActivity extends Activity {
         updateVideoVolumePreview();
     }
 
+    private int msToPixels(long ms) {
+        return (int)Math.min(200000L,Math.max(0L,Math.round(ms / 1000d * dp(TIMELINE_DP_PER_SECOND))));
+    }
+    private long pixelsToMs(float px) {
+        return Math.round(px / Math.max(1f,dp(TIMELINE_DP_PER_SECOND))*1000d);
+    }
+    private int timelineWidth() {
+        return Math.max(dp(340),msToPixels(totalMs())+dp(24));
+    }
     private void renderVideoTimeline() {
         clipTimeline.removeAllViews();
         clipActions.removeAllViews();
-        summaryLabel.setText("VÍDEO  •  " + clips.size() + " clipes  •  " + formatMs(totalMs()));
+        summaryLabel.setText("VÍDEO  •  " + clips.size() + " cenas  •  " + formatMs(totalMs()));
+        int width=timelineWidth();
+        clipTimeline.setLayoutParams(new FrameLayout.LayoutParams(width,dp(153)));
         if (clips.isEmpty()) {
-            clipTimeline.addView(text("Adicione vídeos do Flow para montar sua história.", 13, MUTED, false));
-            clipLabel.setText("A sequência e os cortes aparecem aqui.");
+            TextView placeholder=text("Toque em + VÍDEOS para começar a edição.",13,MUTED,false);
+            clipTimeline.addView(placeholder,new FrameLayout.LayoutParams(-2,dp(60)));
+            clipLabel.setText("O vídeo ficará acima das faixas de música.");
             return;
         }
-        if (selectedClip < 0 || selectedClip >= clips.size()) selectedClip = 0;
-        for (int i = 0; i < clips.size(); i++) {
-            final int index = i;
-            Clip c = clips.get(i);
-            LinearLayout tile = vertical();
-            int width = Math.max(86, Math.min(165, (int)(c.length() / 1000.0 * 13)));
-            tile.setBackground(outline(index == selectedClip ? CYAN : DARK, index == selectedClip ? 2 : 1, 8));
-            tile.setPadding(dp(4), dp(4), dp(4), dp(4));
-            LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(dp(width), dp(118));
-            layout.setMargins(0, 0, dp(5), 0);
-            clipTimeline.addView(tile, layout);
-            ImageView thumb = new ImageView(this);
-            thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            thumb.setBackgroundColor(Color.rgb(45, 46, 56));
-            tile.addView(thumb, new LinearLayout.LayoutParams(-1, dp(76)));
-            makeThumbnail(c, thumb);
-            TextView name = text((i + 1) + " · " + formatMs(c.length()) + "  ♪" + c.volume + "%", 11, WHITE, true);
-            name.setGravity(Gravity.CENTER);
-            tile.addView(name, margin(0, 6));
-            tile.setOnClickListener(v -> { selectedClip = index; seekStartOf(index); renderVideoTimeline(); });
-            if (index < clips.size() - 1) {
-                TextView transitionChip = text(transitionSymbol(c.transition), 11, CYAN, true);
-                transitionChip.setGravity(Gravity.CENTER);
-                LinearLayout.LayoutParams chip = new LinearLayout.LayoutParams(dp(58), dp(110));
-                chip.setMargins(0, 0, dp(4), 0);
-                clipTimeline.addView(transitionChip, chip);
-                transitionChip.setOnClickListener(v -> chooseTransition(index));
-            }
+        if (selectedClip < 0 || selectedClip >= clips.size()) selectedClip=0;
+        int seconds=(int)Math.min(18000,totalMs()/1000+1);
+        for(int second=0;second<seconds;second+=5) {
+            TextView tick=text(formatMs(second*1000L),10,MUTED,false);
+            tick.setGravity(Gravity.START);
+            FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(dp(62),dp(22));
+            p.leftMargin=msToPixels(second*1000L);
+            clipTimeline.addView(tick,p);
         }
-        Clip active = clips.get(selectedClip);
-        clipLabel.setText("Selecionado: " + (selectedClip + 1) + ". " + active.name + "  •  " + formatMs(active.length()) + "  •  som " + active.volume + "%");
-        LinearLayout row = horizontal();
-        clipActions.addView(row);
-        equalButton(row, "✂ CORTAR", PURPLE, () -> editClip(active));
-        equalButton(row, "◀ MOVER", DARK, () -> moveClip(-1));
-        equalButton(row, "MOVER ▶", DARK, () -> moveClip(1));
-        LinearLayout row2 = horizontal();
-        clipActions.addView(row2, margin(0, 6));
-        equalButton(row2, "DUPLICAR", DARK, () -> duplicateClip());
-        equalButton(row2, "REMOVER", DARK, () -> removeClip());
-        if (selectedClip < clips.size() - 1) {
-            LinearLayout row3 = horizontal();
-            clipActions.addView(row3, margin(0, 6));
-            equalButton(row3, "✦ TRANSIÇÃO: " + active.transition.toUpperCase(Locale.ROOT), GREEN,
-                () -> chooseTransition(selectedClip));
+        long offset=0L;
+        for(int i=0;i<clips.size();i++) {
+            final int index=i;Clip c=clips.get(i);
+            int x=msToPixels(offset);
+            int w=Math.max(dp(8),msToPixels(c.length()));
+            LinearLayout tile=vertical();
+            tile.setPadding(dp(2),dp(3),dp(2),dp(3));
+            tile.setBackground(outline(index==selectedClip?CYAN:DARK,index==selectedClip?2:1,5));
+            FrameLayout.LayoutParams position=new FrameLayout.LayoutParams(w,dp(112));
+            position.leftMargin=x;position.topMargin=dp(28);
+            clipTimeline.addView(tile,position);
+            ImageView thumb=new ImageView(this);
+            thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            thumb.setBackgroundColor(Color.rgb(45,46,56));
+            tile.addView(thumb,new LinearLayout.LayoutParams(-1,dp(77)));
+            makeThumbnail(c,thumb);
+            TextView label=text((index+1)+"  "+formatMs(c.length())+"  ♪"+c.volume+"%",11,WHITE,true);
+            label.setSingleLine(true);label.setGravity(Gravity.CENTER);
+            tile.addView(label,margin(0,5));
+            tile.setOnClickListener(v -> {selectedClip=index;seekStartOf(index);renderVideoTimeline();});
+            if(i<clips.size()-1) {
+                TextView transition=text("✦",17,CYAN,true);
+                transition.setGravity(Gravity.CENTER);
+                transition.setBackground(outline(CYAN,1,8));
+                FrameLayout.LayoutParams chip=new FrameLayout.LayoutParams(dp(30),dp(30));
+                chip.leftMargin=Math.max(0,x+w-dp(15));chip.topMargin=dp(61);
+                clipTimeline.addView(transition,chip);
+                transition.setOnClickListener(v -> chooseTransition(index));
+            }
+            offset+=c.length();
+        }
+        Clip active=clips.get(selectedClip);
+        clipLabel.setText("Cena "+(selectedClip+1)+"  •  "+active.name+"  •  "+formatMs(active.length())+"  •  som "+active.volume+"%");
+        LinearLayout row=horizontal();clipActions.addView(row);
+        equalButton(row,"✂ CORTAR",PURPLE,()->editClip(active));
+        equalButton(row,"◀ MOVER",DARK,()->moveClip(-1));
+        equalButton(row,"MOVER ▶",DARK,()->moveClip(1));
+        LinearLayout row2=horizontal();clipActions.addView(row2,margin(0,6));
+        equalButton(row2,"DUPLICAR",DARK,()->duplicateClip());
+        equalButton(row2,"REMOVER",DARK,()->removeClip());
+        if(selectedClip<clips.size()-1) {
+            LinearLayout row3=horizontal();clipActions.addView(row3,margin(0,6));
+            equalButton(row3,"✦ TRANSIÇÃO: "+active.transition.toUpperCase(Locale.ROOT),GREEN,
+                ()->chooseTransition(selectedClip));
         }
     }
 
