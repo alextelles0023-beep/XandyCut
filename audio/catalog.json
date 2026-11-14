@@ -1,7 +1,7 @@
 {
-  "title": "Xandy Cut — biblioteca online",
-  "description": "Trilhas instrumentais originais produzidas para o Xandy Cut; sem anúncios, download sob demanda.",
-  "license": "Trilhas originais do projeto Xandy Cut. Permissão para uso em vídeos pessoais e comerciais.",
+  "title": "Xandy Cut — Biblioteca de Trilhas Online",
+  "description": "29 faixas originais para compor montagens, incluindo efeitos sonoros. Escolha as cenas de início e de fim no editor.",
+  "license": "Composições originais criadas para uso livre em montagens pessoais e comerciais dos usuários do Xandy Cut, sem necessidade de atribuição.",
   "tracks": [
     {
       "slug": "aventura",
@@ -21,7 +21,132 @@
     {
       "slug": "cosmos",
       "title": "Horizontes do cosmos",
-      "category": "Atmosfera"
+      "category": "Ambiente"
+    },
+    {
+      "slug": "amanhecer",
+      "title": "Amanhecer dourado",
+      "category": "Inspiração"
+    },
+    {
+      "slug": "drama",
+      "title": "Drama íntimo",
+      "category": "Drama"
+    },
+    {
+      "slug": "romance",
+      "title": "Romance à chuva",
+      "category": "Romântico"
+    },
+    {
+      "slug": "comedia",
+      "title": "Comédia leve",
+      "category": "Humor"
+    },
+    {
+      "slug": "floresta",
+      "title": "Passos na floresta",
+      "category": "Ambiente"
+    },
+    {
+      "slug": "revelacao",
+      "title": "Grande revelação",
+      "category": "Cinemático"
+    },
+    {
+      "slug": "perseguicao",
+      "title": "Perseguição urbana",
+      "category": "Ação"
+    },
+    {
+      "slug": "afrobeats",
+      "title": "Batida afro",
+      "category": "Afrobeat"
+    },
+    {
+      "slug": "batidanoturna",
+      "title": "Batida noturna",
+      "category": "Eletrônico"
+    },
+    {
+      "slug": "loficafe",
+      "title": "Lo-fi de café",
+      "category": "Lo-fi"
+    },
+    {
+      "slug": "nostalgia",
+      "title": "Lembrança distante",
+      "category": "Nostalgia"
+    },
+    {
+      "slug": "vitoria",
+      "title": "Caminho da vitória",
+      "category": "Triunfo"
+    },
+    {
+      "slug": "medo",
+      "title": "Medo crescente",
+      "category": "Suspense"
+    },
+    {
+      "slug": "investigacao",
+      "title": "Investigação secreta",
+      "category": "Mistério"
+    },
+    {
+      "slug": "medieval",
+      "title": "Jornada medieval",
+      "category": "Fantasia"
+    },
+    {
+      "slug": "ficcaocientifica",
+      "title": "Jornada cósmica",
+      "category": "Ficção científica"
+    },
+    {
+      "slug": "pianodelicado",
+      "title": "Piano delicado",
+      "category": "Piano"
+    },
+    {
+      "slug": "tropical",
+      "title": "Energia tropical",
+      "category": "Ritmo"
+    },
+    {
+      "slug": "resistencia",
+      "title": "Resistência",
+      "category": "Épico"
+    },
+    {
+      "slug": "cyber",
+      "title": "Neon distópico",
+      "category": "Cyberpunk"
+    },
+    {
+      "slug": "tensaolenta",
+      "title": "Tensão lenta",
+      "category": "Thriller"
+    },
+    {
+      "slug": "diaalegre",
+      "title": "Um dia alegre",
+      "category": "Humor"
+    },
+    {
+      "slug": "whooshleve",
+      "title": "Transição de ar suave",
+      "category": "Efeito sonoro"
+    },
+    {
+      "slug": "impactograve",
+      "title": "Impacto grave",
+      "category": "Efeito sonoro"
+    },
+    {
+      "slug": "sinoceleste",
+      "title": "Sino celestial",
+      "category": "Efeito sonoro"
     }
   ]
 }
