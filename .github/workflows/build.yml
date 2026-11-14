@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -38,3 +38,11 @@ jobs:
           name: XandyCut-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Criar link direto para instalar o APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk XandyCut-v1.0-beta.apk
+          gh release view v1.0-beta >/dev/null 2>&1 || gh release create v1.0-beta --target "${GITHUB_SHA}" --title "Xandy Cut 1.0 beta" --notes "Editor Android de videos com corte, juncao de clipes e trilha sonora. APK de teste. Requer Android 10 ou posterior." --prerelease
+          gh release upload v1.0-beta XandyCut-v1.0-beta.apk --clobber
