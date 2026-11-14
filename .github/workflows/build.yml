@@ -31,7 +31,16 @@ jobs:
           base64 -d xandycut-source.tar.xz.b64 | tar -xJf -
           test -f app/src/main/java/art/xandy/cut/MainActivity.java
           cp MainActivityV3.java app/src/main/java/art/xandy/cut/MainActivity.java
+          sed -i 's/android:label="Xandy Cut"/android:label="Xandy Cut Online"/' app/src/main/AndroidManifest.xml
+          sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET"/>' app/src/main/AndroidManifest.xml
+          sed -i '/dependencies {/a\    implementation "androidx.media3:media3-effect:1.11.1"' app/build.gradle
           sed -i "s/applicationId 'art.xandy.cut'/applicationId 'art.xandy.cut.online'/; s/versionCode 1/versionCode 3/; s/versionName '1.0'/versionName '1.2'/" app/build.gradle
+      - name: Produzir biblioteca integrada de audios originais
+        run: |
+          python3 -m pip install -q numpy
+          python3 generate_original_audio.py
+          test -s app/src/main/assets/audio/cinema.m4a
+          test -s online_audio/aventura.m4a
       - name: Compilar APK
         run: gradle --no-daemon --stacktrace assembleDebug
       - name: Publicar APK para instalar
@@ -46,5 +55,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk XandyCut-v1.2-beta.apk
-          gh release view v1.2-beta >/dev/null 2>&1 || gh release create v1.1-beta --target "${GITHUB_SHA}" --title "Xandy Cut 1.2 beta" --notes "Editor Android com linha do tempo, miniaturas de clipes, cortes e ate seis faixas de audio com posicao, volume e repeticao. APK beta de teste. Requer Android 10 ou posterior." --prerelease
+          gh release view v1.2-beta >/dev/null 2>&1 || gh release create v1.1-beta --target "${GITHUB_SHA}" --title "Xandy Cut 1.2 beta" --notes "Editor com transicoes entre cenas, 9 audios originais no app, 4 trilhas online, cortes e seis faixas sonoras. Sem anuncios e marca dagua. Android 10 ou superior." --prerelease
           gh release upload v1.1-beta XandyCut-v1.1-beta.apk --clobber
