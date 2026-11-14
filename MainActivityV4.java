@@ -78,6 +78,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -108,7 +109,7 @@ public final class MainActivity extends Activity {
     private static final String ONLINE_URL =
         "https://raw.githubusercontent.com/alextelles0023-beep/XandyCut/main/audio/catalog.json";
     private static final String ONLINE_BASE =
-        "https://github.com/alextelles0023-beep/XandyCut/releases/download/v1.2-beta/";
+        "https://github.com/alextelles0023-beep/XandyCut/releases/download/v1.3-beta/";
     private static final String[] BUILTIN_NAMES = {
         "Cinema épico", "Suspense escuro", "Lo-fi tranquilo", "Afro groove", "Piano suave",
         "Neon futurista", "Whoosh de transição", "Impacto dramático", "Sino mágico"
@@ -898,18 +899,71 @@ public final class MainActivity extends Activity {
     }
     private void showAudioEntries(ArrayList<AudioEntry> entries, String title) {
         if (entries.isEmpty()) { toast("Ainda não há sons neste catálogo."); return; }
-        String[] labels = new String[entries.size()];
-        for (int i = 0; i < entries.size(); i++) {
-            AudioEntry entry = entries.get(i);
-            labels[i] = "♫  " + entry.title + "   •   " + entry.group + (entry.online ? "  ☁" : "  ✓");
-        }
-        new AlertDialog.Builder(this).setTitle(title)
-            .setItems(labels, (d, i) -> showEntryActions(entries.get(i)))
-            .setNegativeButton("Fechar", null).show();
+        LinearLayout root = dialogForm();
+        root.addView(text("Ouça antes, pesquise por estilo e adicione músicas em cenas diferentes.", 12, Color.DKGRAY, false));
+        EditText search = new EditText(this);
+        search.setSingleLine(true);
+        search.setTextColor(Color.DKGRAY);
+        search.setHint("Buscar música, emoção ou categoria");
+        root.addView(search, margin(0, 7));
+
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        for (AudioEntry e : entries) unique.add(e.group);
+        ArrayList<String> groups = new ArrayList<>(unique);
+        Collections.sort(groups);
+        groups.add(0, "Todas as categorias");
+        Spinner category = new Spinner(this);
+        ArrayAdapter<String> categories = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, groups);
+        categories.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        category.setAdapter(categories);
+        root.addView(category, margin(0, 8));
+        TextView counter = text(entries.size() + " áudios disponíveis", 12, Color.DKGRAY, true);
+        root.addView(counter, margin(0, 7));
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout results = vertical();
+        scroll.addView(results);
+        root.addView(scroll, new LinearLayout.LayoutParams(-1, dp(330)));
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(title)
+            .setView(root).setNegativeButton("Fechar", null).create();
+        Runnable refresh = () -> {
+            results.removeAllViews();
+            String query = search.getText().toString().trim().toLowerCase(Locale.ROOT);
+            String group = category.getSelectedItem() == null ? "" : category.getSelectedItem().toString();
+            int count = 0;
+            for (AudioEntry entry : entries) {
+                if (!group.equals("Todas as categorias") && !entry.group.equals(group)) continue;
+                if (!query.isEmpty() && !(entry.title+" "+entry.group).toLowerCase(Locale.ROOT).contains(query)) continue;
+                count++;
+                File cached = new File(new File(getFilesDir(), "library_audio"), entry.slug+".m4a");
+                boolean available = !entry.online || (cached.isFile() && cached.length()>2000);
+                TextView card = text("♫  " + entry.title + "\n      " + entry.group +
+                    (available ? "    ✓ disponível" : "    ☁ baixar"), 14, Color.WHITE, true);
+                card.setPadding(dp(12), dp(10), dp(10), dp(10));
+                card.setBackground(rounded(CARD, 8));
+                results.addView(card, margin(0, 6));
+                card.setOnClickListener(v -> { dialog.dismiss(); showEntryActions(entry); });
+            }
+            counter.setText(count + " de " + entries.size() + " opções");
+            if(count == 0) results.addView(text("Nenhum áudio para esta busca.", 13, Color.DKGRAY, false));
+        };
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { refresh.run(); }
+            @Override public void afterTextChanged(Editable e) { }
+        });
+        category.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) { refresh.run(); }
+            @Override public void onNothingSelected(AdapterView<?> p) { }
+        });
+        dialog.show();
+        refresh.run();
     }
+
     private void showEntryActions(AudioEntry entry) {
         new AlertDialog.Builder(this).setTitle(entry.title)
-            .setMessage(entry.group + (entry.online ? " • música original disponível online. O download fica salvo no aparelho." : " • incluído no aplicativo."))
+            .setMessage(entry.group + " · faixa original Xandy Cut. " +
+                (entry.online ? "Download uma vez e use depois sem internet." : "Disponível sem internet.") +
+                "\n\nInserir: coloca em uma nova faixa. Trocar aqui: encerra a música atual neste ponto e começa a nova.")
             .setNeutralButton("▶ Ouvir", (d, w) -> acquireAudio(entry, file -> {
                 if (catalogPlayer != null) { catalogPlayer.release(); catalogPlayer = null; }
                 catalogPlayer = new ExoPlayer.Builder(this).build();
@@ -917,20 +971,47 @@ public final class MainActivity extends Activity {
                 catalogPlayer.prepare(); catalogPlayer.setVolume(.85f); catalogPlayer.play();
                 toast("Ouvindo: " + entry.title);
             }))
-            .setPositiveButton("+ Adicionar", (d, w) -> acquireAudio(entry, file -> {
-                if (clips.isEmpty()) { toast("Adicione um vídeo antes de inserir a trilha."); return; }
-                if (sounds.size() >= 6) { toast("Máximo de 6 faixas por montagem."); return; }
-                long duration = duration(Uri.fromFile(file));
-                if (duration < 200) { toast("Áudio inválido."); return; }
-                long timeline = Math.min(currentTimelineMs(), Math.max(0, totalMs()-1));
-                SoundTrack t = new SoundTrack(Uri.fromFile(file), entry.title, duration, timeline);
-                t.repeat = !entry.group.equals("Efeito sonoro");
-                sounds.add(t);
-                renderSoundTracks(); saveDraft();
-                toast("Trilha adicionada: " + entry.title);
-            }))
-            .setNegativeButton("Voltar", (d, w) -> openLibrary(entry.online)).show();
+            .setPositiveButton("+ Inserir", (d, w) -> acquireAudio(entry, file -> insertAudio(entry,file,false)))
+            .setNegativeButton("Trocar aqui", (d, w) -> acquireAudio(entry, file -> insertAudio(entry,file,true)))
+            .show();
     }
+
+    private void insertAudio(AudioEntry entry, File file, boolean replaceMusic) {
+        if (clips.isEmpty()) { toast("Adicione os vídeos antes de inserir a trilha."); return; }
+        if (sounds.size() >= MAX_SOUND_TRACKS) { toast("Limite de 16 trilhas. Remova alguma antes."); return; }
+        long d = duration(Uri.fromFile(file));
+        if (d < 250) { toast("Arquivo de áudio inválido."); return; }
+        long start = Math.min(currentTimelineMs(), Math.max(0,totalMs()-1));
+        boolean effect = entry.group.equals("Efeito sonoro");
+        if (replaceMusic && !effect) {
+            ArrayList<SoundTrack> removing = new ArrayList<>();
+            for (SoundTrack t : sounds) {
+                if (t.effect || t.startMs > start || t.endMs <= start) continue;
+                if (t.startMs == start) {
+                    releaseSound(t); removing.add(t);
+                } else {
+                    t.endMs = start;
+                    releaseSound(t);
+                }
+            }
+            sounds.removeAll(removing);
+        }
+        SoundTrack t = new SoundTrack(Uri.fromFile(file), entry.title, d, start);
+        t.effect = effect;
+        t.repeat = !effect;
+        t.endMs = totalMs();
+        if (effect) t.endMs = Math.min(totalMs(),start+d);
+        else if (replaceMusic) {
+            for (SoundTrack later : sounds)
+                if (!later.effect && later.startMs > start && later.startMs < t.endMs)
+                    t.endMs = later.startMs;
+        }
+        sounds.add(t);
+        renderSoundTracks(); saveDraft();
+        toast(replaceMusic ? "Nova trilha a partir deste ponto" : "Trilha adicionada. Escolha as cenas.");
+        editSound(t);
+    }
+
     private void acquireAudio(AudioEntry entry, Consumer<File> callback) {
         toast(entry.online ? "Baixando som (primeira utilização)..." : "Preparando áudio...");
         worker.execute(() -> {
