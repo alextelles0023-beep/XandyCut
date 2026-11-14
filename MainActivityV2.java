@@ -684,7 +684,7 @@ public final class MainActivity extends Activity {
             } while (s.repeat && remaining >= 100 && n < 200);
             sequences.add(lane.build());
         }
-        Composition composition = new Composition.Builder(sequences.toArray(new EditedMediaItemSequence[0])).build();
+        Composition composition = new Composition.Builder(sequences).build();
         tempFile = new File(getCacheDir(), "xandy_export_" + System.currentTimeMillis() + ".mp4");
         setExporting(true);
         statusLabel.setText("Renderizando vídeo com as trilhas... mantenha o aplicativo aberto.");
