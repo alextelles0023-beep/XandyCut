@@ -57,5 +57,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk XandyCut-v1.2-beta.apk
-          gh release view v1.2-beta >/dev/null 2>&1 || gh release create v1.1-beta --target "${GITHUB_SHA}" --title "Xandy Cut 1.2 beta" --notes "Editor com transicoes entre cenas, 9 audios originais no app, 4 trilhas online, cortes e seis faixas sonoras. Sem anuncios e marca dagua. Android 10 ou superior." --prerelease
-          gh release upload v1.1-beta XandyCut-v1.1-beta.apk --clobber
+          gh release view v1.2-beta >/dev/null 2>&1 || gh release create v1.2-beta --target "${GITHUB_SHA}" --title "Xandy Cut 1.2 beta" --notes "Editor com transicoes entre cenas, 9 audios originais no app, 4 trilhas online, cortes e seis faixas sonoras. Sem anuncios e marca dagua. Android 10 ou superior." --prerelease
+          gh release upload v1.2-beta XandyCut-v1.2-beta.apk online_audio/*.m4a --clobber
