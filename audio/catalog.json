@@ -1,0 +1,27 @@
+{
+  "title": "Xandy Cut — biblioteca online",
+  "description": "Trilhas instrumentais originais produzidas para o Xandy Cut; sem anúncios, download sob demanda.",
+  "license": "Trilhas originais do projeto Xandy Cut. Permissão para uso em vídeos pessoais e comerciais.",
+  "tracks": [
+    {
+      "slug": "aventura",
+      "title": "Aventura heroica",
+      "category": "Cinemático"
+    },
+    {
+      "slug": "noite",
+      "title": "Noite misteriosa",
+      "category": "Suspense"
+    },
+    {
+      "slug": "batalha",
+      "title": "Batalha elétrica",
+      "category": "Ação"
+    },
+    {
+      "slug": "cosmos",
+      "title": "Horizontes do cosmos",
+      "category": "Atmosfera"
+    }
+  ]
+}
